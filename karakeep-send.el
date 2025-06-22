@@ -231,6 +231,68 @@ Returns the selected list ID or nil if cancelled/failed."
                                 ("title" . ,title))
                               list-id))))
 
+(defun karakeep-org (&optional list-id)
+  "Send the current org-mode buffer to Karakeep after converting to markdown."
+  (interactive)
+  (unless (derived-mode-p 'org-mode)
+    (error "Buffer is not in org-mode"))
+  
+  ;; Ensure markdown exporter is loaded
+  (require 'ox-md)
+  
+  (let* ((original-buffer (current-buffer))
+         (buffer-title (or (buffer-name) "Untitled"))
+         (buffer-file (buffer-file-name))
+         ;; Remove .org extension if present for cleaner title
+         (clean-title (if (string-suffix-p ".org" buffer-title)
+                          (substring buffer-title 0 -4)
+                        buffer-title))
+         ;; Configure export options to disable TOC and anchors
+         (org-export-with-toc nil)
+         (org-html-with-latex nil)
+         (org-export-with-section-numbers nil)
+         (org-export-with-author nil)
+         (org-export-with-date nil)
+         (org-export-with-title nil)
+         (org-export-with-creator nil)
+         (org-export-with-archived-trees nil)
+         (org-export-with-broken-links 'mark)
+         (org-export-with-clocks nil)
+         (org-export-with-drawers nil)
+         (org-export-with-footnotes t)
+         (org-export-with-latex t)
+         (org-export-with-planning nil)
+         (org-export-with-priority nil)
+         (org-export-with-properties nil)
+         (org-export-with-special-strings t)
+         (org-export-with-statistics-cookies t)
+         (org-export-with-sub-superscripts t)
+         (org-export-with-tables t)
+         (org-export-with-tags t)
+         (org-export-with-tasks t)
+         (org-export-with-timestamps t)
+         (org-export-with-todo-keywords t)
+         ;; Disable anchor generation
+         (org-html-self-link-headlines nil)
+         (markdown-content
+          (with-current-buffer original-buffer
+            ;; Export directly from the original buffer with custom settings
+            (let ((org-export-show-temporary-export-buffer nil))
+              (org-export-as 'md nil nil nil)))))
+    
+    (if (string-empty-p (string-trim markdown-content))
+        (message "⚠️ No content to send.")
+      ;; Clean up any remaining anchor tags
+      (let ((clean-content (replace-regexp-in-string
+                           "<a id=\"[^\"]*\"></a>\n*" ""
+                           markdown-content)))
+        (karakeep--send-request `(("type" . "text")
+                                  ("sourceUrl" . ,(concat "emacs://" buffer-file))
+                                  ("text" . ,clean-content)
+                                  ("title" . ,clean-title))
+                                list-id)))))
+
+
 ;;;###autoload
 (defun karakeep-dwim (&optional arg)
   "Send content to Karakeep based on context.
@@ -247,6 +309,11 @@ With universal argument, prompt for list selection."
        ((eq major-mode 'eww-mode)
         (karakeep-send-eww-page list-id))
 
+       ((and (derived-mode-p 'org-mode)
+             (not (use-region-p))
+             (not (karakeep--get-link-at-point)))
+        (karakeep-org list-id))
+       
        ((use-region-p)
         (karakeep-send-region list-id))
 
